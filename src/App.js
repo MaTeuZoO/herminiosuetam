@@ -1,7 +1,9 @@
+// Caminho do arquivo: src/App.js
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { AnimatePresence } from 'framer-motion';
-import { Loader, Edit, Trash2, Plus } from 'lucide-react'; // Adicionado Plus para o botão Novo Projeto
+import { Loader, Edit, Trash2 } from 'lucide-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import * as api from './api/supabaseService';
@@ -24,28 +26,25 @@ import { useAppInteractions } from './components/ui/hooks/useAppInteractions';
 
 const queryClient = new QueryClient();
 
+// ... (sua função getTodayDetails permanece a mesma)
 const getTodayDetails = () => {
     const today = new Date();
     const dayNames = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
-
-    // Garante que a data YYYY-MM-DD seja do dia local, sem problemas de fuso horário
     const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0'); // Mês é 0-indexado
+    const month = String(today.getMonth() + 1).padStart(2, '0');
     const day = String(today.getDate()).padStart(2, '0');
-    const isoDateString = `${year}-${month}-${day}`; // Formato 'YYYY-MM-DD'
-
-    // Formato 'DD/MM' para exibição
+    const isoDateString = `${year}-${month}-${day}`;
     const displayDateString = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}`;
-
     return {
-        id: isoDateString, // Isso agora deve ser consistente com o dia local
+        id: isoDateString,
         name: dayNames[today.getDay()],
         date: displayDateString,
         dayOfMonth: today.getDate().toString(),
         dayName: dayNames[today.getDay()].substring(0,3).toUpperCase(),
-        fullDate: today, // O objeto Date completo
+        fullDate: today,
     };
 };
+
 
 function AppContent() {
   const [loading, setLoading] = useState(true);
@@ -54,25 +53,25 @@ function AppContent() {
   const { projects, subtasks: allSubtasks, session: storeSession } = useCoreDataStore();
   const { setSession, fetchCoreData, tickTimer } = useCoreDataStore(state => state);
   const { tasksByDay, enrichedPlan, isLoading: isPlanLoading } = useEnrichedPlan();
-  const { deleteTask, updateTask, updateTaskOrder, createTask, isPending: isCreatingTask } = useTaskMutations(); // Adicionado isPending para isCreatingTask
+  const { deleteTask, updateTask, updateTaskOrder, createTask } = useTaskMutations();
   const { deleteProject } = useProjectMutations();
+  const isCreatingTask = false; // Placeholder se você não pegou o 'isPending' da mutação
 
-  // Cria uma referência para o contentor da timeline
   const timelineContainerRef = useRef(null);
 
-  // === INÍCIO DAS MUDANÇAS AQUI ===
-  // O selectedProjectId e projectToEdit já estão no useAppInteractions, o que é ótimo!
-  // Porém, o ProjectView precisa receber o objeto 'project' completo para exibir nome/cor/descrição.
-  // E o createTask, isCreatingTask devem ser passados para o ProjectView.
   const {
     currentView, selectedProjectId, viewingTaskId, confirmationRequest, selectedDay,
     isLeftSidebarOpen, isLeftSidebarPinned, isRightSidebarOpen, activeTimer, contextMenu, isProjectModalOpen,
-    projectToEdit, activeId, optimisticTasksByDay, activeTask, viewingTask,
+    projectToEdit, activeId, 
+    optimisticTasksByDay, // <-- Pegando o estado otimista
+    activeTask, viewingTask,
     setViewingTaskId, setConfirmationRequest, setSelectedDay, setIsLeftSidebarPinned,
     setIsLeftSidebarHovered, handleConfirm, handleToggleTimer, handleRightSidebarToggle,
     handleNavigate, handleProjectClick, handleShowContextMenu, handleCloseContextMenu,
     handleOpenProjectModal, handleCloseProjectModal, handleCreateTaskInTimeline,
-    dndSensors, handleDragStart, handleDragOver, handleDragEnd, handleDragCancel
+    dndSensors, handleDragStart, 
+    handleDragOver, // <-- Pegando o novo handler
+    handleDragEnd, handleDragCancel
   } = useAppInteractions({
       tasksByDay,
       enrichedPlan,
@@ -83,14 +82,10 @@ function AppContent() {
       timelineContainerRef,
   });
 
-  // Encontra o objeto do projeto selecionado para passar ao ProjectView
-  // Isso garante que ProjectView tenha acesso a project.name, project.color, project.description
   const selectedProjectObject = useMemo(() => {
     return projects.find(p => p.id === selectedProjectId);
   }, [projects, selectedProjectId]);
 
-
-  const scrollContainerRef = useRef(null);
 
   useEffect(() => {
     const handleAuthChange = async (session) => {
@@ -104,14 +99,10 @@ function AppContent() {
     return () => { subscription?.unsubscribe(); };
   }, [setSession, fetchCoreData]);
 
-  // Debugging: Verifica a inicialização do selectedDay
   useEffect(() => {
     if (!selectedDay) {
         const todayDetails = getTodayDetails();
-        console.log("App.js: Initializing selectedDay with:", todayDetails.fullDate, todayDetails.name, todayDetails.id);
         setSelectedDay(todayDetails);
-    } else {
-        console.log("App.js: selectedDay already set to:", selectedDay.fullDate, selectedDay.name, selectedDay.id);
     }
   }, [selectedDay, setSelectedDay]);
 
@@ -142,27 +133,32 @@ function AppContent() {
     ]);
   }, [deleteProject, handleShowContextMenu, handleOpenProjectModal, setConfirmationRequest]);
 
+
   const renderCurrentView = () => {
+    // --- LÓGICA DO PASSO 2 ---
+    // Se o estado otimista existir (ou seja, estamos arrastando), use-o.
+    // Caso contrário, use o estado normal (tasksByDay).
     const planToRender = optimisticTasksByDay || tasksByDay;
+    // --- FIM DA LÓGICA DO PASSO 2 ---
+    
     switch (currentView) {
       case 'project_view':
-        // === CORREÇÃO APLICADA: Passando as props corretas para ProjectView ===
         return (
           <ProjectView
-            project={selectedProjectObject} // Passe o objeto completo do projeto
-            selectedProjectId={selectedProjectId} // Mantenha o ID do projeto
+            project={selectedProjectObject}
+            selectedProjectId={selectedProjectId}
             onTaskClick={(task) => setViewingTaskId(task.id)}
             onOpenProjectModal={handleOpenProjectModal}
-            createTask={createTask} // Passe a função real de criar tarefa
-            isCreatingTask={isCreatingTask} // Passe o estado de carregamento da criação de tarefa
+            createTask={createTask}
+            isCreatingTask={isCreatingTask}
           />
         );
       case 'weekly_kanban':
       default:
         return (
           <WeeklyKanbanView
-            scrollContainerRef={scrollContainerRef}
-            tasksByDay={planToRender}
+            // Passamos o `planToRender` para o Kanban
+            tasksByDay={planToRender} 
             isLoading={isPlanLoading}
             onTaskClick={(task) => setViewingTaskId(task.id)}
             onDeleteTask={(taskId) => setConfirmationRequest({
@@ -194,7 +190,13 @@ function AppContent() {
       <div className="flex h-screen font-sans bg-slate-50 text-zinc-800">
         <Sidebar projects={projects} onOpenProjectModal={handleOpenProjectModal} onShowProjectMenu={handleShowProjectMenu} selectedProjectId={selectedProjectId} onProjectClick={handleProjectClick} currentView={currentView} onNavigate={handleNavigate} isCollapsed={!isLeftSidebarOpen} onPin={() => setIsLeftSidebarPinned(true)} onClose={() => setIsLeftSidebarPinned(false)} onHoverEnter={() => !isLeftSidebarPinned && setIsLeftSidebarHovered(true)} onHoverLeave={() => setIsLeftSidebarHovered(false)} />
 
-        <DndContext sensors={dndSensors} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+        <DndContext 
+            sensors={dndSensors} 
+            onDragStart={handleDragStart} 
+            onDragOver={handleDragOver} // <-- Adicionamos o novo handler aqui
+            onDragEnd={handleDragEnd} 
+            onDragCancel={handleDragCancel}
+        >
             <div className="flex-1 flex overflow-hidden">{renderCurrentView()}</div>
             <TimelineSidebar
                 timelineContainerRef={timelineContainerRef}
