@@ -1,8 +1,11 @@
+// Caminho do ficheiro: src/features/weekly-kanban/DayColumn.js
+
 import React, { useState, useMemo } from 'react';
 import { Plus } from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { SortableTaskCard } from './SortableTaskCard';
+import SortableTaskCard from './SortableTaskCard';
+import { motion, AnimatePresence } from 'framer-motion'; // Importamos motion e AnimatePresence
 
 import { useTaskMutations } from './hooks/useTaskMutations';
 import EmptyState from '../../components/ui/EmptyState';
@@ -32,8 +35,6 @@ const DayColumn = React.forwardRef((props, ref) => {
   const dayId = day.fullDate.toISOString().split('T')[0];
   const { setNodeRef, isOver } = useDroppable({ id: dayId });
   
-  // --- A CORREÇÃO ESTÁ AQUI ---
-  // Garantimos que as tarefas estão sempre ordenadas pela sua posição antes de serem usadas.
   const sortedTasks = useMemo(() => tasks.slice().sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity)), [tasks]);
   const taskIds = useMemo(() => sortedTasks.map(t => t.id), [sortedTasks]);
 
@@ -95,20 +96,23 @@ const DayColumn = React.forwardRef((props, ref) => {
             <div className="flex-grow px-2 pt-1 pb-1 overflow-y-auto custom-scrollbar">
               {sortedTasks.length === 0 && !isAdding && <EmptyState onAddTask={handleAddTaskClick} />}
               
-              {sortedTasks.map((task) => (
-                <SortableTaskCard
-                  key={task.id}
-                  task={task}
-                  project={task.projects}
-                  onTaskClick={onTaskClick}
-                  onEdit={onEditTask}
-                  onDelete={onDeleteTask}
-                  activeTimer={activeTimer}
-                  onToggleTimer={onToggleTimer}
-                  onShowContextMenu={onShowContextMenu}
-                  isDragging={activeId === task.id}
-                />
-              ))}
+              {/* Envolvemos a lista com AnimatePresence para animar a entrada/saída */}
+              <AnimatePresence>
+                {sortedTasks.map((task) => (
+                  <SortableTaskCard
+                    key={task.id}
+                    task={task}
+                    project={task.projects}
+                    onTaskClick={onTaskClick}
+                    onEdit={onEditTask}
+                    onDelete={onDeleteTask}
+                    activeTimer={activeTimer}
+                    onToggleTimer={onToggleTimer}
+                    onShowContextMenu={onShowContextMenu}
+                    isDragging={activeId === task.id}
+                  />
+                ))}
+              </AnimatePresence>
             </div>
           </SortableContext>
         </div>
