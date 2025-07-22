@@ -1,11 +1,19 @@
+// Caminho do ficheiro: src/components/ui/hooks/useAppInteractions.js
+
 import { useState, useMemo, useCallback } from 'react';
 import { useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import { arrayMove } from '@dnd-kit/sortable';
 
-const PIXELS_PER_MINUTE = 1; // 60px de altura da hora / 60 minutos
-const SNAP_INTERVAL_MINUTES = 15;
-
-// Hook para gerir toda a lógica de interação da UI
-export const useAppInteractions = ({ tasksByDay, enrichedPlan, updateTask, createTask, timelineContainerRef }) => {
+export const useAppInteractions = ({
+    tasksByDay,
+    enrichedPlan,
+    updateTask,
+    updateTaskOrder,
+    createTask,
+    deleteProject,
+    timelineContainerRef
+}) => {
+    // Seus estados permanecem iguais...
     const [currentView, setCurrentView] = useState('weekly_kanban');
     const [selectedProjectId, setSelectedProjectId] = useState(null);
     const [viewingTaskId, setViewingTaskId] = useState(null);
@@ -21,63 +29,19 @@ export const useAppInteractions = ({ tasksByDay, enrichedPlan, updateTask, creat
     const [projectToEdit, setProjectToEdit] = useState(null);
     const [activeId, setActiveId] = useState(null);
     const [optimisticTasksByDay, setOptimisticTasksByDay] = useState(null);
+    const [startContainerId, setStartContainerId] = useState(null);
 
+    // Seus outros hooks e handlers permanecem iguais...
     const activeTask = useMemo(() => {
-        if (!activeId) return null;
+        if (!activeId || !enrichedPlan) return null;
         const taskId = typeof activeId === 'string' && activeId.startsWith('unscheduled-') ? activeId.split('-')[1] : activeId;
         return enrichedPlan.find(task => task.id === taskId);
     }, [activeId, enrichedPlan]);
-
+    
     const viewingTask = useMemo(() => {
         if (!viewingTaskId || !enrichedPlan) return null;
         return enrichedPlan.find(t => t.id === viewingTaskId);
     }, [viewingTaskId, enrichedPlan]);
-
-    const handleDragStart = useCallback((event) => {
-        setActiveId(event.active.id);
-        if (event.active.data.current?.type === 'task') {
-            setOptimisticTasksByDay(tasksByDay);
-        }
-    }, [tasksByDay]);
-
-    const handleDragEnd = useCallback((event) => {
-        const { active, over } = event;
-        
-        // --- INÍCIO DA CORREÇÃO: Lógica de arrastar para a timeline ---
-        if (active.data.current?.type === 'unscheduled-task' && over?.id === 'timeline-drop-zone') {
-            const task = active.data.current.task;
-            const timelineNode = timelineContainerRef.current;
-            
-            if (timelineNode) {
-                const rect = timelineNode.getBoundingClientRect();
-                const dropY = event.activatorEvent.clientY - rect.top; // Posição Y relativa ao contentor
-                const scrollTop = timelineNode.scrollTop;
-                
-                const totalMinutes = (dropY + scrollTop) / PIXELS_PER_MINUTE;
-                const snappedMinutes = Math.floor(totalMinutes / SNAP_INTERVAL_MINUTES) * SNAP_INTERVAL_MINUTES;
-                
-                const hour = Math.min(23, Math.max(0, Math.floor(snappedMinutes / 60)));
-                const minute = snappedMinutes % 60;
-                const timeString = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-                
-                updateTask({ taskId: task.id, updatedFields: { start_time: timeString } });
-            }
-        } 
-        // --- FIM DA CORREÇÃO ---
-        else if (active.data.current?.type === 'task') {
-            // Lógica de reordenação do Kanban mantida...
-        }
-
-        setActiveId(null);
-        setOptimisticTasksByDay(null);
-    }, [updateTask, timelineContainerRef]);
-    
-    const handleDragCancel = () => {
-        setActiveId(null);
-        setOptimisticTasksByDay(null);
-    };
-
-    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
     const handleConfirm = () => {
         if (confirmationRequest?.onConfirm) confirmationRequest.onConfirm();
@@ -115,6 +79,108 @@ export const useAppInteractions = ({ tasksByDay, enrichedPlan, updateTask, creat
         });
     }, [selectedDay, tasksByDay, createTask]);
 
+
+    const handleDragStart = useCallback((event) => {
+        setActiveId(event.active.id);
+        if (event.active.data.current?.type === 'task') {
+            setOptimisticTasksByDay(tasksByDay);
+            setStartContainerId(event.active.data.current.sortable.containerId);
+        }
+    }, [tasksByDay]);
+
+    const handleDragOver = useCallback((event) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id || active.data.current?.type !== 'task') return;
+
+        const activeContainer = active.data.current.sortable.containerId;
+        const overContainer = over.data.current?.sortable?.containerId || over.id;
+
+        if (activeContainer && overContainer) {
+            setOptimisticTasksByDay(prev => {
+                if (!prev) return null;
+                
+                // --- A CORREÇÃO ESTÁ AQUI ---
+                // Se um dia não tiver tarefas, tratamo-lo como uma lista vazia `[]`
+                const activeItems = prev[activeContainer] || [];
+                const overItems = prev[overContainer] || [];
+
+                const activeIndex = activeItems.findIndex(i => i.id === active.id);
+                const overIndex = overItems.findIndex(i => i.id === over.id);
+
+                if (activeIndex === -1) return prev;
+
+                if (activeContainer === overContainer) {
+                    if (overIndex !== -1) {
+                        return { ...prev, [activeContainer]: arrayMove(activeItems, activeIndex, overIndex) };
+                    }
+                } else {
+                    const [movedItem] = activeItems.splice(activeIndex, 1);
+                    const newIndex = overIndex >= 0 ? overIndex : overItems.length;
+                    overItems.splice(newIndex, 0, movedItem);
+                    return { ...prev, [activeContainer]: [...activeItems], [overContainer]: [...overItems] };
+                }
+                return prev;
+            });
+        }
+    }, []);
+    
+    const handleDragEnd = useCallback((event) => {
+        const { active, over } = event;
+        if (!over) {
+            setActiveId(null);
+            setOptimisticTasksByDay(null);
+            setStartContainerId(null);
+            return;
+        }
+        
+        const activeContainer = startContainerId;
+        const overContainer = over.data.current?.sortable?.containerId || over.id;
+        
+        const finalState = optimisticTasksByDay || tasksByDay;
+        
+        if (activeContainer && overContainer && activeContainer === overContainer) {
+            if (active.id !== over.id) {
+                const reorderedTasks = finalState[activeContainer] || [];
+                const planEntriesToUpdate = reorderedTasks.map((task, index) => ({
+                    planEntryId: task.planEntryId,
+                    position: index,
+                    planDate: task.planDate,
+                }));
+                updateTaskOrder(planEntriesToUpdate);
+            }
+        } else if (activeContainer && overContainer) {
+            const sourceColumnTasks = finalState[activeContainer] || [];
+            const destinationColumnTasks = finalState[overContainer] || [];
+
+            const sourceUpdates = sourceColumnTasks.map((task, index) => ({
+                planEntryId: task.planEntryId,
+                position: index,
+                planDate: activeContainer,
+            }));
+
+            const destinationUpdates = destinationColumnTasks.map((task, index) => ({
+                planEntryId: task.planEntryId,
+                position: index,
+                planDate: overContainer,
+            }));
+            
+            const combinedUpdates = [...sourceUpdates, ...destinationUpdates];
+            updateTaskOrder(combinedUpdates);
+        }
+
+        setActiveId(null);
+        setOptimisticTasksByDay(null);
+        setStartContainerId(null);
+    }, [startContainerId, tasksByDay, optimisticTasksByDay, updateTaskOrder]);
+
+    const handleDragCancel = () => {
+        setActiveId(null);
+        setOptimisticTasksByDay(null);
+        setStartContainerId(null);
+    };
+
+    const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
     return {
         currentView, selectedProjectId, viewingTaskId, confirmationRequest, selectedDay,
         isLeftSidebarOpen, isLeftSidebarPinned, isRightSidebarOpen, activeTimer, contextMenu, isProjectModalOpen,
@@ -123,7 +189,6 @@ export const useAppInteractions = ({ tasksByDay, enrichedPlan, updateTask, creat
         setIsLeftSidebarHovered, handleConfirm, handleToggleTimer, handleRightSidebarToggle,
         handleNavigate, handleProjectClick, handleShowContextMenu, handleCloseContextMenu,
         handleOpenProjectModal, handleCloseProjectModal, handleCreateTaskInTimeline,
-        dndSensors: sensors, handleDragStart, handleDragEnd, handleDragCancel,
-        handleDragOver: () => {}, // DragOver não é mais necessário aqui
+        dndSensors: sensors, handleDragStart, handleDragOver, handleDragEnd, handleDragCancel,
     };
 };
