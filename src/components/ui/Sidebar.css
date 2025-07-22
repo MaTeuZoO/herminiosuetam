@@ -1,0 +1,17 @@
+/* Animação para o texto aparecer (fade-in) */
+.text-fade-enter {
+  opacity: 0;
+}
+.text-fade-enter-active {
+  opacity: 1;
+  transition: opacity 200ms ease-in-out;
+}
+
+/* Animação para o texto desaparecer (fade-out) */
+.text-fade-exit {
+  opacity: 1;
+}
+.text-fade-exit-active {
+  opacity: 0;
+  transition: opacity 150ms ease-in-out;
+}
